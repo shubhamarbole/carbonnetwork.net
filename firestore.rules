@@ -1,0 +1,173 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // -------------------------------------------------------------
+    // AUTHENTICATION & RBAC HELPER FUNCTIONS
+    // -------------------------------------------------------------
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function getRole() {
+      return isAuthenticated() && 'role' in request.auth.token ? request.auth.token.role : 'VIEWER';
+    }
+
+    function getOrgId() {
+      return isAuthenticated() && 'organizationId' in request.auth.token ? request.auth.token.organizationId : '';
+    }
+
+    function isSuperAdmin() {
+      return isAuthenticated() && getRole() == 'SUPER_ADMIN';
+    }
+
+    function isPlatformAdmin() {
+      return isAuthenticated() && getRole() == 'PLATFORM_ADMIN';
+    }
+
+    function isAuditor() {
+      return isAuthenticated() && (getRole() == 'AUDITOR' || isPlatformAdmin() || isSuperAdmin());
+    }
+
+    function isManager() {
+      return isAuthenticated() && (
+        getRole() in ['ADMIN', 'ESG_MANAGER', 'ENVIRONMENTAL_MANAGER', 'MSME_USER'] ||
+        isPlatformAdmin() || 
+        isSuperAdmin()
+      );
+    }
+
+    function belongsToOrg(orgId) {
+      return isAuthenticated() && (
+        isSuperAdmin() || 
+        isPlatformAdmin() || 
+        getOrgId() == orgId
+      );
+    }
+
+    function isSoftDeleted(data) {
+      return 'isDeleted' in data && data.isDeleted == true;
+    }
+
+    // -------------------------------------------------------------
+    // USERS COLLECTION
+    // -------------------------------------------------------------
+    match /users/{userId} {
+      allow read: if isAuthenticated() && (
+        request.auth.uid == userId ||
+        isSuperAdmin() ||
+        (isPlatformAdmin() && resource.data.organizationId == getOrgId())
+      );
+      allow create, update, delete: if isSuperAdmin();
+    }
+
+    // -------------------------------------------------------------
+    // ORGANIZATIONS COLLECTION
+    // -------------------------------------------------------------
+    match /organizations/{orgId} {
+      allow read: if belongsToOrg(orgId);
+      allow create, delete: if isSuperAdmin();
+      allow update: if isSuperAdmin() || (isPlatformAdmin() && belongsToOrg(orgId));
+    }
+
+    // -------------------------------------------------------------
+    // PROJECTS COLLECTION
+    // -------------------------------------------------------------
+    match /projects/{projectId} {
+      allow read: if belongsToOrg(resource.data.organizationId);
+      
+      // Tenant users can create drafts for their own organization
+      allow create: if belongsToOrg(request.resource.data.organizationId) &&
+        request.resource.data.status == 'DRAFT' &&
+        request.resource.data.isDeleted == false;
+      
+      // Updates require tenant ownership and non-self-verification
+      allow update: if belongsToOrg(resource.data.organizationId) && (
+        // Auditors and Platform Admins can transition to APPROVED/VERIFIED
+        (request.resource.data.status in ['APPROVED', 'VERIFIED'] ? isAuditor() : true) &&
+        // Only Super Admin can restore soft-deleted or permanently alter
+        (isSoftDeleted(resource.data) && !isSoftDeleted(request.resource.data) ? isSuperAdmin() : true)
+      );
+
+      // Soft delete permitted for managers; Permanent delete strictly Super Admin
+      allow delete: if isSuperAdmin();
+    }
+
+    // -------------------------------------------------------------
+    // ESG & ENVIRONMENTAL DATA RECORDS
+    // -------------------------------------------------------------
+    match /esg_records/{recordId} {
+      allow read: if belongsToOrg(resource.data.organizationId);
+      
+      allow create: if belongsToOrg(request.resource.data.organizationId) &&
+        request.resource.data.status in ['DRAFT', 'SUBMITTED'];
+      
+      allow update: if belongsToOrg(resource.data.organizationId) && (
+        // Verification requires auditor role
+        (request.resource.data.status == 'VERIFIED' ? isAuditor() : true)
+      );
+
+      allow delete: if isSuperAdmin() || (isManager() && belongsToOrg(resource.data.organizationId));
+    }
+
+    // -------------------------------------------------------------
+    // EVIDENCE & DOCUMENTS
+    // -------------------------------------------------------------
+    match /documents/{docId} {
+      allow read: if belongsToOrg(resource.data.organizationId);
+      allow create: if belongsToOrg(request.resource.data.organizationId);
+      allow update: if belongsToOrg(resource.data.organizationId) && (
+        (request.resource.data.status in ['VERIFIED', 'REJECTED'] ? isAuditor() : true)
+      );
+      allow delete: if isSuperAdmin() || (isManager() && belongsToOrg(resource.data.organizationId));
+    }
+
+    // -------------------------------------------------------------
+    // APPROVAL REQUESTS
+    // -------------------------------------------------------------
+    match /approval_requests/{reqId} {
+      allow read: if belongsToOrg(resource.data.organizationId);
+      allow create: if belongsToOrg(request.resource.data.organizationId);
+      allow update, delete: if isPlatformAdmin() || isSuperAdmin() || isAuditor();
+    }
+
+    // -------------------------------------------------------------
+    // NOTIFICATIONS
+    // -------------------------------------------------------------
+    match /notifications/{notifId} {
+      allow read: if isAuthenticated() && (
+        resource.data.userId == request.auth.uid ||
+        belongsToOrg(resource.data.organizationId)
+      );
+      allow update: if isAuthenticated() && (
+        resource.data.userId == request.auth.uid ||
+        belongsToOrg(resource.data.organizationId)
+      );
+      allow create: if isAuthenticated();
+      allow delete: if isSuperAdmin();
+    }
+
+    // -------------------------------------------------------------
+    // AUDIT LOGS (APPEND-ONLY FOR SYSTEM, READ-ONLY FOR TENANT)
+    // -------------------------------------------------------------
+    match /audit_logs/{logId} {
+      allow read: if belongsToOrg(resource.data.organizationId);
+      allow create: if isAuthenticated();
+      allow update, delete: if false; // Immutable audit log
+    }
+
+    // -------------------------------------------------------------
+    // CARBON CREDITS & BATCHES
+    // -------------------------------------------------------------
+    match /carbon_credits/{batchId} {
+      allow read: if belongsToOrg(resource.data.organizationId);
+      allow create, update: if isPlatformAdmin() || isSuperAdmin() || isAuditor();
+      allow delete: if isSuperAdmin();
+    }
+
+    // Fallback reject for any undefined paths
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

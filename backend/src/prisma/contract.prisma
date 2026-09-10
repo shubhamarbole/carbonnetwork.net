@@ -1,0 +1,145 @@
+// use prisma-next
+
+model Organization {
+  id               ObjectId          @id @map("_id")
+  name             String            @unique
+  type             String // e.g. "ENTERPRISE", "MSME", etc.
+  status           String            @default("PENDING")
+  subscriptionPlan String            @default("FREE")
+  createdAt        String
+  updatedAt        String
+  users            User[]
+  projects         CarbonProject[]
+  settings         OrgSettings?
+  @@map("organizations")
+}
+
+model OrgSettings {
+  id             ObjectId     @id @map("_id")
+  organizationId ObjectId     @unique
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  theme          String       @default("light")
+  mfaRequired    Boolean      @default(false)
+  @@map("organization_settings")
+}
+
+model User {
+  id             ObjectId      @id @map("_id")
+  email          String        @unique
+  name           String
+  passwordHash   String
+  organizationId ObjectId
+  organization   Organization  @relation(fields: [organizationId], references: [id])
+  status         String        @default("INVITED")
+  role           String?
+  refreshToken   String?
+  createdAt      String
+  updatedAt      String
+  auditLogs      AuditLog[]
+  buyerTxs       Transaction[] @relation("BuyerRelation")
+  sellerTxs      Transaction[] @relation("SellerRelation")
+  @@map("users")
+}
+
+model CarbonProject {
+  id               ObjectId        @id @map("_id")
+  name             String
+  description      String          @default("")
+  organizationId   ObjectId
+  organization     Organization    @relation(fields: [organizationId], references: [id])
+  type             String
+  location         String
+  methodology      String
+  estimatedCredits Float
+  status           String          @default("DRAFT")
+  createdAt        String
+  updatedAt        String
+  documents        Doc[]
+  creditBatches    CreditBatch[]
+  @@map("projects")
+}
+
+model Doc {
+  id        ObjectId      @id @map("_id")
+  projectId ObjectId
+  project   CarbonProject @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  fileName  String
+  filePath  String
+  uploadedAt String
+  @@map("project_documents")
+}
+
+model CreditBatch {
+  id             ObjectId      @id @map("_id")
+  projectId      ObjectId
+  project        CarbonProject @relation(fields: [projectId], references: [id])
+  vintage        String
+  quantity       Int
+  creditsAvailable Int
+  status         String        @default("PENDING")
+  createdAt      String
+  transactions   Transaction[]
+  @@map("credit_batches")
+}
+
+model Transaction {
+  id            ObjectId    @id @map("_id")
+  creditBatchId ObjectId
+  creditBatch   CreditBatch @relation(fields: [creditBatchId], references: [id])
+  buyerId       ObjectId
+  buyer         User        @relation("BuyerRelation", fields: [buyerId], references: [id])
+  sellerId      ObjectId
+  seller        User        @relation("SellerRelation", fields: [sellerId], references: [id])
+  quantity      Int
+  pricePerUnit  Float
+  status        String      @default("PENDING_APPROVAL")
+  createdAt     String
+  updatedAt     String
+  @@map("transactions")
+}
+
+model ApprovalRequest {
+  id                ObjectId @id @map("_id")
+  type              String
+  referenceId       String
+  organization      String
+  submittedBy       String
+  submittedAt       String
+  priority          String   @default("MEDIUM")
+  status            String   @default("PENDING")
+  comments          String?
+  assignedTo        String?
+  dueDate           String?
+  slaStatus         String?
+  internalNotes     String?
+  escalationStatus  String?
+  escalationDetails String?
+  @@map("approval_requests")
+}
+
+model AuditLog {
+  id             ObjectId @id @map("_id")
+  timestamp      String
+  actorId        ObjectId
+  actor          User     @relation(fields: [actorId], references: [id])
+  action         String
+  module         String
+  entityType     String
+  entityId       String
+  organizationId String
+  ipAddress      String
+  status         String
+  previousValue  String?
+  newValue       String?
+  @@map("audit_logs")
+}
+
+model SystemAlert {
+  id        ObjectId @id @map("_id")
+  priority  String
+  title     String
+  entity    String
+  timestamp String
+  status    String   @default("Active")
+  @@map("system_alerts")
+}

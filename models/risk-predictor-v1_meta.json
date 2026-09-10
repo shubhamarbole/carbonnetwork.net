@@ -1,0 +1,18 @@
+{
+  "model_version": "risk-predictor-v1",
+  "model_type": "LogisticRegression",
+  "feature_version": "risk-features-v1",
+  "training_timestamp": "2026-09-04T11:58:06.103040+00:00",
+  "dataset_version": "dataset-esg-baseline-v1",
+  "status": "DEPLOYED",
+  "metrics": {
+    "accuracy": 0.94,
+    "precision": 0.9024,
+    "recall": 0.9867,
+    "f1_score": 0.9427,
+    "roc_auc": 0.9883,
+    "pr_auc": 0.9885,
+    "brier_score": 0.0444,
+    "sample_count": 150
+  }
+}

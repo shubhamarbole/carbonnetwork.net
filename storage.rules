@@ -1,0 +1,59 @@
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+
+    // Helper functions
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isSuperAdmin() {
+      return isAuthenticated() && request.auth.token.role == 'SUPER_ADMIN';
+    }
+
+    function isPlatformAdmin() {
+      return isAuthenticated() && request.auth.token.role == 'PLATFORM_ADMIN';
+    }
+
+    function belongsToOrg(orgId) {
+      return isAuthenticated() && (
+        isSuperAdmin() || 
+        isPlatformAdmin() || 
+        request.auth.token.organizationId == orgId
+      );
+    }
+
+    function isValidEvidenceFile() {
+      return request.resource.size < 10 * 1024 * 1024 && // Max 10MB
+        (
+          request.resource.contentType.matches('image/.*') ||
+          request.resource.contentType == 'application/pdf' ||
+          request.resource.contentType == 'text/csv' ||
+          request.resource.contentType == 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' ||
+          request.resource.contentType == 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' ||
+          request.resource.contentType == 'application/msword'
+        );
+    }
+
+    // Organization and Project evidence documents
+    match /evidence/{organizationId}/{projectId}/{fileName} {
+      allow read: if belongsToOrg(organizationId);
+      allow write: if belongsToOrg(organizationId) && isValidEvidenceFile();
+      allow delete: if isSuperAdmin() || (belongsToOrg(organizationId) && request.auth.token.role in ['ADMIN', 'ESG_MANAGER']);
+    }
+
+    // Direct organization general evidence
+    match /evidence/{organizationId}/{fileName} {
+      allow read: if belongsToOrg(organizationId);
+      allow write: if belongsToOrg(organizationId) && isValidEvidenceFile();
+      allow delete: if isSuperAdmin() || (belongsToOrg(organizationId) && request.auth.token.role in ['ADMIN', 'ESG_MANAGER']);
+    }
+
+    // Public reports (strictly signed exports)
+    match /reports/{organizationId}/{reportName} {
+      allow read: if belongsToOrg(organizationId);
+      allow write: if isSuperAdmin() || isPlatformAdmin() || belongsToOrg(organizationId);
+      allow delete: if isSuperAdmin();
+    }
+  }
+}

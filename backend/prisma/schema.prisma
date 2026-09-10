@@ -1,0 +1,208 @@
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+enum OrgType {
+  ENTERPRISE
+  MSME
+  INVESTOR
+  STAKEHOLDER
+  SYSTEM
+}
+
+enum OrgStatus {
+  ACTIVE
+  SUSPENDED
+  PENDING
+}
+
+enum UserStatus {
+  ACTIVE
+  SUSPENDED
+  INVITED
+}
+
+enum ProjectStatus {
+  DRAFT
+  SUBMITTED
+  UNDER_REVIEW
+  APPROVED
+  REJECTED
+  ACTIVE
+  SUSPENDED
+  COMPLETED
+  ARCHIVED
+}
+
+enum CreditStatus {
+  PENDING
+  ISSUED
+  ACTIVE
+  LISTED
+  TRANSFERRED
+  RETIRED
+  FROZEN
+  CANCELLED
+}
+
+enum TxStatus {
+  PENDING_APPROVAL
+  APPROVED
+  REJECTED
+  COMPLETED
+}
+
+enum ApprovalType {
+  ORGANIZATION
+  PROJECT
+  CREDIT_ISSUANCE
+  VERIFICATION
+  TRANSACTION
+}
+
+enum ApprovalStatus {
+  PENDING
+  UNDER_REVIEW
+  APPROVED
+  REJECTED
+  CHANGES_REQUESTED
+}
+
+enum AlertPriority {
+  CRITICAL
+  HIGH
+  MEDIUM
+  LOW
+}
+
+model Organization {
+  id               String            @id @default(uuid())
+  name             String            @unique
+  type             OrgType
+  status           OrgStatus         @default(PENDING)
+  subscriptionPlan String            @default("FREE")
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+  users            User[]
+  projects         CarbonProject[]
+  settings         OrgSettings?
+}
+
+model OrgSettings {
+  id             String       @id @default(uuid())
+  organizationId String       @unique
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  theme          String       @default("light")
+  mfaRequired    Boolean      @default(false)
+}
+
+model User {
+  id             String        @id @default(uuid())
+  email          String        @unique
+  name           String
+  passwordHash   String
+  organizationId String
+  organization   Organization  @relation(fields: [organizationId], references: [id])
+  status         UserStatus    @default(INVITED)
+  refreshToken   String?
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+  auditLogs      AuditLog[]
+  buyerTxs       Transaction[] @relation("BuyerRelation")
+  sellerTxs      Transaction[] @relation("SellerRelation")
+}
+
+model CarbonProject {
+  id               String          @id @default(uuid())
+  name             String
+  description      String          @default("")
+  organizationId   String
+  organization     Organization    @relation(fields: [organizationId], references: [id])
+  type             String
+  location         String
+  methodology      String
+  estimatedCredits Float
+  status           ProjectStatus   @default(DRAFT)
+  createdAt        DateTime        @default(now())
+  updatedAt        DateTime        @updatedAt
+  documents        Doc[]
+  creditBatches    CreditBatch[]
+}
+
+model Doc {
+  id        String        @id @default(uuid())
+  projectId String
+  project   CarbonProject @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  fileName  String
+  filePath  String
+  uploadedAt DateTime     @default(now())
+}
+
+model CreditBatch {
+  id             String        @id @default(uuid())
+  projectId      String
+  project        CarbonProject @relation(fields: [projectId], references: [id])
+  vintage        String
+  quantity       Int
+  creditsAvailable Int
+  status         CreditStatus  @default(PENDING)
+  createdAt      DateTime      @default(now())
+  transactions   Transaction[]
+}
+
+model Transaction {
+  id            String      @id @default(uuid())
+  creditBatchId String
+  creditBatch   CreditBatch @relation(fields: [creditBatchId], references: [id])
+  buyerId       String
+  buyer         User        @relation("BuyerRelation", fields: [buyerId], references: [id])
+  sellerId      String
+  seller         User        @relation("SellerRelation", fields: [sellerId], references: [id])
+  quantity      Int
+  pricePerUnit  Float
+  status        TxStatus    @default(PENDING_APPROVAL)
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+}
+
+model ApprovalRequest {
+  id           String         @id @default(uuid())
+  type         ApprovalType
+  referenceId  String
+  organization String
+  submittedBy  String
+  submittedAt  DateTime       @default(now())
+  priority     AlertPriority  @default(MEDIUM)
+  status       ApprovalStatus @default(PENDING)
+  comments     String?
+}
+
+model AuditLog {
+  id             String   @id @default(uuid())
+  timestamp      DateTime @default(now())
+  actorId        String
+  actor          User     @relation(fields: [actorId], references: [id])
+  action         String
+  module         String
+  entityType     String
+  entityId       String
+  organizationId String
+  ipAddress      String
+  status         String
+  previousValue  String?  @db.Text
+  newValue       String?  @db.Text
+}
+
+model SystemAlert {
+  id        String        @id @default(uuid())
+  priority  AlertPriority
+  title     String
+  entity    String
+  timestamp DateTime      @default(now())
+  status    String        @default("Active")
+}
